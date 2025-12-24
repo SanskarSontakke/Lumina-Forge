@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Download, RefreshCw, AlertCircle, X, Check, Undo2, Redo2, SlidersHorizontal, 
   Sun, Contrast, Droplet, Palette, Crop, Eye, RotateCcw, ChevronDown,
-  Moon, Thermometer, RotateCw, Wand2, Sparkles
+  Moon, Thermometer, RotateCw, Wand2, Sparkles, SplitSquareHorizontal, MoveHorizontal
 } from 'lucide-react';
 
 interface ResultViewerProps {
@@ -37,7 +37,13 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
   onAutoEnhance
 }) => {
   const [showFilters, setShowFilters] = useState(false);
-  const [isComparing, setIsComparing] = useState(false);
+  
+  // Slider State
+  const [isSliderMode, setIsSliderMode] = useState(false);
+  const [sliderPosition, setSliderPosition] = useState(50);
+  const [isDragging, setIsDragging] = useState(false);
+  const imageContainerRef = useRef<HTMLDivElement>(null);
+
   const [filters, setFilters] = useState({
     brightness: 100,
     contrast: 100,
@@ -57,8 +63,57 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
     setFilters({ brightness: 100, contrast: 100, grayscale: 0, sepia: 0, saturation: 100, temperature: 0 });
     setRotation(0);
     setShowFilters(false);
-    setIsComparing(false);
+    setIsSliderMode(false);
+    setSliderPosition(50);
   }, [generatedImage]);
+
+  // Handle Slider Dragging
+  const handleMove = useCallback((clientX: number) => {
+    if (!imageContainerRef.current) return;
+    const rect = imageContainerRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(clientX - rect.left, rect.width));
+    const percentage = (x / rect.width) * 100;
+    setSliderPosition(percentage);
+  }, []);
+
+  const onMouseMove = useCallback((e: MouseEvent) => {
+    if (isDragging) {
+        e.preventDefault();
+        handleMove(e.clientX);
+    }
+  }, [isDragging, handleMove]);
+
+  const onTouchMove = useCallback((e: TouchEvent) => {
+    if (isDragging) {
+        e.preventDefault(); // Prevent scrolling while dragging slider
+        handleMove(e.touches[0].clientX);
+    }
+  }, [isDragging, handleMove]);
+
+  const onMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  useEffect(() => {
+    if (isDragging) {
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('touchmove', onTouchMove, { passive: false });
+      window.addEventListener('mouseup', onMouseUp);
+      window.addEventListener('touchend', onMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('touchend', onMouseUp);
+    };
+  }, [isDragging, onMouseMove, onTouchMove, onMouseUp]);
+
+  const startDragging = (e: React.MouseEvent | React.TouchEvent) => {
+    setIsDragging(true);
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    handleMove(clientX);
+  };
 
   const handleFilterChange = (key: keyof typeof filters, value: number) => {
     setFilters(prev => ({ ...prev, [key]: value }));
@@ -289,28 +344,100 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
                 <p className="text-gray-500 text-xs">{error}</p>
               </div>
             ) : generatedImage ? (
-              <div className="relative w-full h-full group">
-                <img 
-                  src={generatedImage} 
-                  alt="Generated" 
-                  style={{
-                    filter: isComparing ? 'none' : `brightness(${filters.brightness}%) contrast(${filters.contrast}%) grayscale(${filters.grayscale}%) sepia(${filters.sepia}%) saturate(${filters.saturation}%)`,
-                    transform: isComparing ? 'none' : `rotate(${rotation}deg)`
-                  }}
-                  className="w-full h-full object-contain p-4 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-repeat invert-[.05] transition-all duration-300 group-hover:scale-105"
-                />
-                {/* Temperature Overlay Preview */}
-                {!isComparing && filters.temperature !== 0 && (
-                   <div 
-                     className="absolute inset-0 pointer-events-none transition-opacity duration-300 z-10"
-                     style={{
-                        backgroundColor: filters.temperature > 0 ? 'rgb(255, 147, 41)' : 'rgb(0, 160, 255)',
-                        opacity: Math.abs(filters.temperature) / 100 * 0.5,
-                        mixBlendMode: 'soft-light',
-                        // Rotate overlay to match image
+              <div 
+                  ref={imageContainerRef}
+                  className="relative w-full h-full group select-none touch-none"
+                  onMouseDown={isSliderMode ? startDragging : undefined}
+                  onTouchStart={isSliderMode ? startDragging : undefined}
+              >
+                {/* Comparison Mode */}
+                {isSliderMode ? (
+                  <>
+                     {/* Bottom Layer: Generated Image (After) */}
+                     <img 
+                      src={generatedImage} 
+                      alt="Generated" 
+                      style={{
+                        filter: `brightness(${filters.brightness}%) contrast(${filters.contrast}%) grayscale(${filters.grayscale}%) sepia(${filters.sepia}%) saturate(${filters.saturation}%)`,
                         transform: `rotate(${rotation}deg)`
-                     }}
-                   />
+                      }}
+                      className="absolute inset-0 w-full h-full object-contain p-4"
+                    />
+                    {/* Temperature Overlay (Bottom Layer) */}
+                    {filters.temperature !== 0 && (
+                      <div 
+                        className="absolute inset-0 pointer-events-none z-10"
+                        style={{
+                            backgroundColor: filters.temperature > 0 ? 'rgb(255, 147, 41)' : 'rgb(0, 160, 255)',
+                            opacity: Math.abs(filters.temperature) / 100 * 0.5,
+                            mixBlendMode: 'soft-light',
+                            transform: `rotate(${rotation}deg)`
+                        }}
+                      />
+                    )}
+
+                    {/* Top Layer: Original Image (Before) - Clipped */}
+                    <div 
+                      className="absolute inset-0 w-full h-full"
+                      style={{
+                        clipPath: `inset(0 ${100 - sliderPosition}% 0 0)`
+                      }}
+                    >
+                      <img 
+                        src={originalImage} 
+                        alt="Original" 
+                        className="w-full h-full object-contain p-4 bg-zinc-950"
+                        style={{
+                           // Match rotation for better comparison alignment if user rotated result
+                           transform: `rotate(${rotation}deg)`
+                        }}
+                      />
+                      {/* Label for Original side */}
+                      <div className="absolute top-6 left-6 bg-black/50 backdrop-blur-md text-white text-[10px] font-bold px-2 py-1 rounded border border-white/10 uppercase tracking-wider">
+                         Original
+                      </div>
+                    </div>
+                    
+                    {/* Label for Result side (visible when slider moves) */}
+                    <div className="absolute top-6 right-6 bg-pink-500/20 backdrop-blur-md text-pink-200 text-[10px] font-bold px-2 py-1 rounded border border-pink-500/20 uppercase tracking-wider pointer-events-none">
+                        Result
+                    </div>
+
+                    {/* Slider Handle */}
+                    <div 
+                      className="absolute top-0 bottom-0 w-1 bg-white cursor-ew-resize z-20 shadow-[0_0_10px_rgba(0,0,0,0.5)]"
+                      style={{ left: `${sliderPosition}%` }}
+                    >
+                       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full flex items-center justify-center shadow-lg text-black">
+                          <MoveHorizontal className="w-4 h-4" />
+                       </div>
+                    </div>
+                  </>
+                ) : (
+                  /* Standard Mode */
+                  <>
+                    <img 
+                      src={generatedImage} 
+                      alt="Generated" 
+                      style={{
+                        filter: `brightness(${filters.brightness}%) contrast(${filters.contrast}%) grayscale(${filters.grayscale}%) sepia(${filters.sepia}%) saturate(${filters.saturation}%)`,
+                        transform: `rotate(${rotation}deg)`
+                      }}
+                      className="w-full h-full object-contain p-4 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-repeat invert-[.05] transition-all duration-300"
+                    />
+                    {/* Temperature Overlay Preview */}
+                    {filters.temperature !== 0 && (
+                      <div 
+                        className="absolute inset-0 pointer-events-none transition-opacity duration-300 z-10"
+                        style={{
+                            backgroundColor: filters.temperature > 0 ? 'rgb(255, 147, 41)' : 'rgb(0, 160, 255)',
+                            opacity: Math.abs(filters.temperature) / 100 * 0.5,
+                            mixBlendMode: 'soft-light',
+                            transform: `rotate(${rotation}deg)`
+                        }}
+                      />
+                    )}
+                  </>
                 )}
               </div>
             ) : (
@@ -474,16 +601,11 @@ const ResultViewer: React.FC<ResultViewerProps> = ({
 
               <div className="flex items-center gap-2">
                  <button
-                   onMouseDown={() => setIsComparing(true)}
-                   onMouseUp={() => setIsComparing(false)}
-                   onMouseLeave={() => setIsComparing(false)}
-                   onTouchStart={() => setIsComparing(true)}
-                   onTouchEnd={() => setIsComparing(false)}
-                   disabled={!hasActiveFilters}
-                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-transparent transition-all select-none ${hasActiveFilters ? 'text-indigo-300 hover:text-indigo-200 hover:bg-indigo-500/10 active:bg-indigo-500/20' : 'text-gray-600 cursor-not-allowed'}`}
-                   title="Hold to see original"
+                   onClick={() => setIsSliderMode(!isSliderMode)}
+                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all select-none ${isSliderMode ? 'bg-indigo-500/20 text-indigo-200 border-indigo-500/30' : 'text-indigo-300 hover:text-indigo-200 border-transparent hover:bg-indigo-500/10'}`}
+                   title="Toggle Comparison Slider"
                  >
-                   <Eye className="w-3.5 h-3.5" /> Compare
+                   <SplitSquareHorizontal className="w-3.5 h-3.5" /> {isSliderMode ? 'Exit Compare' : 'Compare'}
                  </button>
 
                  <button

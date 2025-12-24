@@ -99,6 +99,8 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCropComplete, onCa
             onZoomChange={setZoom}
             onMediaLoaded={onMediaLoaded}
             objectFit="contain"
+            minZoom={1}
+            maxZoom={3}
             style={{
                 containerStyle: { background: '#09090b' },
                 cropAreaStyle: { border: '2px solid #ec4899', boxShadow: '0 0 0 9999em rgba(0, 0, 0, 0.7)' }
@@ -121,7 +123,7 @@ const ImageCropper: React.FC<ImageCropperProps> = ({ image, onCropComplete, onCa
                 value={zoom}
                 min={1}
                 max={3}
-                step={0.1}
+                step={0.01}
                 aria-labelledby="Zoom"
                 onChange={(e) => setZoom(Number(e.target.value))}
                 className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-pink-500"

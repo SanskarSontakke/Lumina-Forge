@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useRef } from 'react';
 import { Sparkles, ArrowRight, Eraser, Palette, Zap, Undo2, Redo2, Scaling, Square, RectangleHorizontal, RectangleVertical } from 'lucide-react';
 
 interface PromptEditorProps {
@@ -40,11 +40,87 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
   setWidth,
   height,
   setHeight,
-  onUndo,
-  onRedo,
-  canUndo,
-  canRedo
+  // Note: We are using local history for the editor buttons, ignoring global undo/redo props for these specific controls
 }) => {
+  // Local History State for Prompt and Dimensions
+  const [history, setHistory] = useState<{
+    past: Array<{ prompt: string; width: number; height: number }>;
+    future: Array<{ prompt: string; width: number; height: number }>;
+  }>({ past: [], future: [] });
+
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Helper to save current state to history
+  const saveToHistory = () => {
+    setHistory(prev => ({
+      past: [...prev.past, { prompt, width, height }],
+      future: []
+    }));
+  };
+
+  const handleLocalUndo = () => {
+    if (history.past.length === 0) return;
+    const previous = history.past[history.past.length - 1];
+    const newPast = history.past.slice(0, -1);
+    
+    // Save current state to future before restoring
+    setHistory({
+      past: newPast,
+      future: [{ prompt, width, height }, ...history.future]
+    });
+    
+    setPrompt(previous.prompt);
+    setWidth(previous.width);
+    setHeight(previous.height);
+  };
+
+  const handleLocalRedo = () => {
+    if (history.future.length === 0) return;
+    const next = history.future[0];
+    const newFuture = history.future.slice(1);
+    
+    // Save current state to past before restoring
+    setHistory({
+      past: [...history.past, { prompt, width, height }],
+      future: newFuture
+    });
+    
+    setPrompt(next.prompt);
+    setWidth(next.width);
+    setHeight(next.height);
+  };
+
+  const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value;
+    
+    // Save history only if starting a new typing sequence (debounced)
+    if (!typingTimeoutRef.current) {
+      saveToHistory();
+    }
+    
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      typingTimeoutRef.current = null;
+    }, 1000);
+
+    setPrompt(newValue);
+  };
+
+  const handleDimensionInput = (newWidth: number, newHeight: number) => {
+    // For number inputs, we can also use a simple debounce or just save on every change
+    // Using the same debounce logic for consistency and to prevent history spam on spinner use
+    if (!typingTimeoutRef.current) {
+      saveToHistory();
+    }
+    
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      typingTimeoutRef.current = null;
+    }, 1000);
+
+    setWidth(newWidth);
+    setHeight(newHeight);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,10 +130,12 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
   };
 
   const handleQuickAction = (actionPrompt: string) => {
+    saveToHistory();
     setPrompt(actionPrompt);
   };
 
   const handleAspectRatioClick = (ratio: number) => {
+    saveToHistory();
     const longSide = Math.max(width, height);
     if (ratio === 1) {
       setWidth(longSide);
@@ -71,6 +149,9 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
     }
   };
 
+  const canLocalUndo = history.past.length > 0;
+  const canLocalRedo = history.future.length > 0;
+
   return (
     <div className="bg-zinc-900/50 p-6 rounded-3xl shadow-2xl border border-white/10 h-full flex flex-col backdrop-blur-md relative overflow-hidden">
       {/* Decorative background blob */}
@@ -83,27 +164,29 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
         </h2>
         <div className="flex items-center gap-1 bg-zinc-950/50 rounded-lg p-1 border border-white/5">
           <button 
-            onClick={onUndo}
-            disabled={!canUndo || isProcessing}
+            type="button"
+            onClick={handleLocalUndo}
+            disabled={!canLocalUndo || isProcessing}
             className={`p-2 rounded-md transition-all ${
-              canUndo && !isProcessing
+              canLocalUndo && !isProcessing
                 ? 'text-gray-400 hover:text-white hover:bg-white/10' 
                 : 'text-gray-700 cursor-not-allowed'
             }`}
-            title="Undo"
+            title="Undo Edit"
           >
             <Undo2 className="w-4 h-4" />
           </button>
           <div className="w-px h-4 bg-white/10"></div>
           <button 
-            onClick={onRedo}
-            disabled={!canRedo || isProcessing}
+            type="button"
+            onClick={handleLocalRedo}
+            disabled={!canLocalRedo || isProcessing}
             className={`p-2 rounded-md transition-all ${
-              canRedo && !isProcessing
+              canLocalRedo && !isProcessing
                 ? 'text-gray-400 hover:text-white hover:bg-white/10' 
                 : 'text-gray-700 cursor-not-allowed'
             }`}
-            title="Redo"
+            title="Redo Edit"
           >
             <Redo2 className="w-4 h-4" />
           </button>
@@ -116,6 +199,7 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
           {QUICK_ACTIONS.map((action) => (
             <button
               key={action.label}
+              type="button"
               onClick={() => handleQuickAction(action.prompt)}
               disabled={isProcessing}
               className="group flex flex-col gap-2 p-3 text-sm text-gray-300 bg-zinc-800/50 border border-white/5 rounded-xl hover:bg-zinc-800 hover:border-pink-500/30 transition-all text-left relative overflow-hidden"
@@ -160,7 +244,7 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
                 <input 
                   type="number" 
                   value={width} 
-                  onChange={(e) => setWidth(Math.max(1, parseInt(e.target.value) || 0))}
+                  onChange={(e) => handleDimensionInput(Math.max(1, parseInt(e.target.value) || 0), height)}
                   className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
                   placeholder="Width"
                 />
@@ -171,7 +255,7 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
                 <input 
                   type="number" 
                   value={height} 
-                  onChange={(e) => setHeight(Math.max(1, parseInt(e.target.value) || 0))}
+                  onChange={(e) => handleDimensionInput(width, Math.max(1, parseInt(e.target.value) || 0))}
                   className="w-full bg-zinc-950 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-pink-500/50 transition-colors"
                   placeholder="Height"
                 />
@@ -191,7 +275,7 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
             className="relative w-full resize-none rounded-xl border border-white/10 shadow-inner sm:text-sm p-4 bg-zinc-950 text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-0 focus:border-transparent transition-colors"
             placeholder="Describe your vision... (e.g., 'Place product on a dark wooden table with cinematic lighting')"
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={handlePromptChange}
             disabled={isProcessing}
           />
         </div>
